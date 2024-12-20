@@ -7,27 +7,55 @@ class PositionAPI:
     def __init__(self, url, api_key):
         self.url = url
         self.api_key = api_key
-        self.latest_data = None
+        self.latest_data = {
+            'ship_name': 'Connecting...',
+            'mmsi': 'N/A',
+            'lat': '0.0000',
+            'lon': '0.0000',
+            'speed': '0.0',
+            'course': '0.0',
+            'timestamp': datetime.utcnow().isoformat()
+        }
+        self.connected = False
     
     async def connect_and_listen(self, mmsi):
-        async with websockets.connect(self.url) as websocket:
-            # Send subscription message
-            subscribe_message = {
-                "APIKey": self.api_key,
-                "BoundingBoxes": [[[-90, -180], [90, 180]]],
-                "FiltersShipMMSI": [str(mmsi)],
-                "FilterMessageTypes": ["PositionReport"]
-            }
-            
-            await websocket.send(json.dumps(subscribe_message))
-            
-            async for message in websocket:
-                try:
-                    data = json.loads(message)
-                    if data['MessageType'] == 'PositionReport':
-                        self.latest_data = self.format_position_data(data)
-                except Exception as e:
-                    print(f"Error processing message: {e}")
+        while True:
+            try:
+                async with websockets.connect(self.url) as websocket:
+                    print(f"Connected to AIS stream, subscribing to MMSI {mmsi}")
+                    self.connected = True
+                    
+                    # Send subscription message
+                    subscribe_message = {
+                        "APIKey": self.api_key,
+                        "BoundingBoxes": [[[-90, -180], [90, 180]]],
+                        "FiltersShipMMSI": [str(mmsi)],
+                        "FilterMessageTypes": ["PositionReport"]
+                    }
+                    
+                    await websocket.send(json.dumps(subscribe_message))
+                    
+                    async for message in websocket:
+                        try:
+                            data = json.loads(message)
+                            if data['MessageType'] == 'PositionReport':
+                                self.latest_data = self.format_position_data(data)
+                                print(f"Received position update for {self.latest_data['ship_name']}")
+                        except Exception as e:
+                            print(f"Error processing message: {e}")
+            except Exception as e:
+                print(f"WebSocket connection error: {e}")
+                self.connected = False
+                self.latest_data = {
+                    'ship_name': 'Reconnecting...',
+                    'mmsi': 'N/A',
+                    'lat': '0.0000',
+                    'lon': '0.0000',
+                    'speed': '0.0',
+                    'course': '0.0',
+                    'timestamp': datetime.utcnow().isoformat()
+                }
+                await asyncio.sleep(5)  # Wait before reconnecting
 
     def format_position_data(self, data):
         if not data:
@@ -41,9 +69,9 @@ class PositionAPI:
             'mmsi': metadata.get('MMSI', 'N/A'),
             'lat': f"{message.get('Latitude', 0):.4f}",
             'lon': f"{message.get('Longitude', 0):.4f}",
-            'speed': message.get('Sog', 'N/A'),
-            'course': message.get('Cog', 'N/A'),
-            'timestamp': metadata.get('time_utc', 'N/A')
+            'speed': f"{message.get('Sog', 0):.1f}",
+            'course': f"{message.get('Cog', 0):.1f}",
+            'timestamp': metadata.get('time_utc', datetime.utcnow().isoformat())
         }
 
     def get_latest_data(self):
