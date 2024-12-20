@@ -25,110 +25,108 @@ class PositionAPI:
         }
         self.connected = False
         self.connection_error = None
-        self._max_retries = 10
-        self._retry_delay = 5  # Base delay in seconds
+        self._heartbeat_interval = 15  # Send heartbeat every 15 seconds
         
+    async def _heartbeat(self, websocket):
+        """Send periodic heartbeat to keep connection alive"""
+        try:
+            while True:
+                await asyncio.sleep(self._heartbeat_interval)
+                try:
+                    await websocket.ping()
+                except:
+                    break
+        except asyncio.CancelledError:
+            pass
+
     async def connect_and_listen(self, mmsi):
-        retry_count = 0
-        
         while True:
             try:
-                logger.info(f"\nAttempt {retry_count + 1} to connect to AIS Stream")
-                logger.info(f"URL: {self.url}")
-                logger.info(f"MMSI Filter: {mmsi}")
+                logger.info("\nConnecting to AIS Stream...")
                 
-                # Configure SSL context with proper error handling
+                # Configure SSL context
                 ssl_context = ssl.create_default_context()
                 ssl_context.check_hostname = False
                 ssl_context.verify_mode = ssl.CERT_NONE
-                
-                # Establish WebSocket connection with improved timeouts
-                websocket = await websockets.connect(
+
+                async with websockets.connect(
                     self.url,
                     ssl=ssl_context,
-                    ping_interval=20,
-                    ping_timeout=30,  # Increased timeout
-                    close_timeout=20,  # Increased timeout
-                    max_size=2**23,    # Increased message size limit
-                    compression=None   # Disable compression to reduce complexity
-                )
-                
-                logger.info("WebSocket connection established")
-                self.connected = True
-                self.connection_error = None
-                self.latest_data['connection_status'] = 'connected'
-                
-                # Prepare subscription message
-                subscribe_message = {
-                    "APIKey": self.api_key,
-                    "BoundingBoxes": [[[-90, -180], [90, 180]]],
-                    "FiltersShipMMSI": [str(mmsi)],
-                    "FilterMessageTypes": ["PositionReport"]
-                }
-                
-                # Send subscription with timeout
-                try:
-                    await asyncio.wait_for(
-                        websocket.send(json.dumps(subscribe_message)),
-                        timeout=10
-                    )
-                    logger.info("Subscription sent successfully")
+                    ping_interval=None,  # Disable built-in ping
+                    close_timeout=5,
+                    max_size=2**23,
+                    compression=None,
+                    extra_headers={
+                        'User-Agent': 'TRMNL-Ship-Tracker/1.0'
+                    }
+                ) as websocket:
+                    logger.info("WebSocket connection established")
+                    self.connected = True
+                    self.connection_error = None
+                    self.latest_data['connection_status'] = 'connected'
                     
-                    # Reset retry count on successful connection
-                    retry_count = 0
+                    # Start heartbeat task
+                    heartbeat_task = asyncio.create_task(self._heartbeat(websocket))
                     
-                    # Main message processing loop
-                    async for message in websocket:
-                        try:
-                            data = json.loads(message)
-                            message_type = data.get('MessageType', 'unknown')
-                            logger.info(f"Received message type: {message_type}")
-                            
-                            if message_type == 'PositionReport':
-                                self.latest_data = self.format_position_data(data)
-                                self.latest_data['connection_status'] = 'connected'
-                                logger.info(f"Updated position: {self.latest_data['lat']}, {self.latest_data['lon']}")
-                            elif message_type == 'error':
-                                error_msg = data.get('error', 'Unknown error')
-                                logger.error(f"Received error message: {error_msg}")
-                                raise Exception(error_msg)
+                    try:
+                        # Subscribe to ship data
+                        subscribe_message = {
+                            "APIKey": self.api_key,
+                            "BoundingBoxes": [[[-90, -180], [90, 180]]],
+                            "FiltersShipMMSI": [str(mmsi)],
+                            "FilterMessageTypes": ["PositionReport"]
+                        }
+                        
+                        await websocket.send(json.dumps(subscribe_message))
+                        logger.info("Subscription sent")
+                        
+                        # Process incoming messages
+                        async for message in websocket:
+                            try:
+                                data = json.loads(message)
+                                message_type = data.get('MessageType', 'unknown')
+                                logger.info(f"Received message type: {message_type}")
                                 
-                        except json.JSONDecodeError as e:
-                            logger.error(f"Failed to parse message: {str(e)}")
-                            continue
+                                if message_type == 'PositionReport':
+                                    self.latest_data = self.format_position_data(data)
+                                    logger.info(f"Updated position: {self.latest_data['lat']}, {self.latest_data['lon']}")
+                                elif message_type == 'error':
+                                    error_msg = data.get('error', 'Unknown error')
+                                    logger.error(f"Server error: {error_msg}")
+                                    raise Exception(error_msg)
+                                    
+                            except json.JSONDecodeError as e:
+                                logger.error(f"JSON parse error: {str(e)}")
+                                continue
+                                
+                    except Exception as e:
+                        logger.error(f"WebSocket error: {str(e)}")
+                        raise
+                        
+                    finally:
+                        # Clean up heartbeat task
+                        heartbeat_task.cancel()
+                        try:
+                            await heartbeat_task
+                        except asyncio.CancelledError:
+                            pass
                             
-                except asyncio.TimeoutError:
-                    logger.error("Timeout while sending subscription")
-                    raise
-                    
             except Exception as e:
                 self.connected = False
                 self.connection_error = str(e)
-                self.latest_data['connection_status'] = 'disconnected'
-                
-                retry_count += 1
-                wait_time = min(300, self._retry_delay * (2 ** min(retry_count, 5)))  # Exponential backoff capped at 5 minutes
-                
-                logger.error(f"Connection error: {str(e)}")
-                logger.error(f"Full traceback: {traceback.format_exc()}")
-                
-                if retry_count >= self._max_retries:
-                    logger.error("Max retries reached, extending retry interval")
-                    retry_count = 0  # Reset count but keep longer interval
-                
                 self.latest_data.update({
-                    'ship_name': f'Reconnecting in {wait_time}s... (Attempt {retry_count + 1}/{self._max_retries})',
+                    'connection_status': 'disconnected',
+                    'ship_name': 'Reconnecting...',
                     'mmsi': mmsi,
+                    'error': str(e)
                 })
                 
-                logger.info(f"Waiting {wait_time} seconds before retry...")
-                await asyncio.sleep(wait_time)
-            
-            finally:
-                try:
-                    await websocket.close()
-                except:
-                    pass
+                logger.error(f"Connection error: {str(e)}")
+                logger.error(f"Traceback: {traceback.format_exc()}")
+                
+                # Wait before reconnecting
+                await asyncio.sleep(5)
+                continue
 
     def format_position_data(self, data):
         """Format position data with proper error handling"""
