@@ -24,20 +24,20 @@ tracking_thread.start()
 @app.route('/webhook', methods=['GET'])
 def trmnl_webhook():
     """TRMNL webhook endpoint"""
-    # Verify TRMNL Plugin UUID
-    plugin_uuid = request.headers.get('X-TRMNL-Plugin-UUID')
-    if plugin_uuid != Config.TRMNL_PLUGIN_UUID:
-        return jsonify({"error": "Invalid Plugin UUID"}), 401
-
     try:
+        # Log incoming request
+        print(f"Received webhook request with headers: {dict(request.headers)}")
+        
         # Get the latest ship data
         ship_data = position_api.get_latest_data()
+        print(f"Current ship data: {json.dumps(ship_data)}")
         
         # Create the display image
         image_data = display_generator.create_display(ship_data)
+        print(f"Generated image of size: {len(image_data)} bytes")
         
         # Return bitmap with TRMNL headers
-        return Response(
+        response = Response(
             image_data,
             mimetype='image/bmp',
             headers={
@@ -45,13 +45,15 @@ def trmnl_webhook():
                 'X-TRMNL-Plugin-UUID': Config.TRMNL_PLUGIN_UUID
             }
         )
+        print(f"Sending response with headers: {dict(response.headers)}")
+        return response
 
     except Exception as e:
-        print(f"Error: {str(e)}")
+        print(f"Error in webhook: {str(e)}")
         return jsonify({
             "error": str(e)
         }), 500
-
+        
 if __name__ == "__main__":
     print(f"\nStarting TRMNL Ship Tracker")
     print(f"Plugin UUID: {Config.TRMNL_PLUGIN_UUID}")
