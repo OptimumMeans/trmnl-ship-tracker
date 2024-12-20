@@ -5,33 +5,41 @@ import io
 from PIL import Image, ImageDraw, ImageFont
 from datetime import datetime
 from .config import Config
+from .services.display import DisplayGenerator
+from .services.position_api import PositionAPI
+from .utils.formatters import format_timestamp, format_coordinates
 
 app = Flask(__name__)
+
+# Initialize services
+display_generator = DisplayGenerator(Config.DISPLAY_WIDTH, Config.DISPLAY_HEIGHT)
+position_api = PositionAPI(Config.POSITION_API_URL)
 
 def create_ship_display(data):
     """Create a 1-bit bitmap display for TRMNL's e-ink screen"""
     # Create white background (1-bit color)
-    img = Image.new('1', (800, 480), 1)
+    img = Image.new('1', (Config.DISPLAY_WIDTH, Config.DISPLAY_HEIGHT), 1)
     draw = ImageDraw.Draw(img)
     
     # Use default font
     font = ImageFont.load_default()
     
     # Draw header
-    draw.text((40, 40), "Ship Tracker - Docked Status", font=font, fill=0)
+    draw.text((40, 40), "Ship Tracker - Position Status", font=font, fill=0)
     
     # Format timestamp
-    try:
-        timestamp = datetime.fromisoformat(data.get('timestamp', '').replace('Z', '+00:00'))
-        time_str = timestamp.strftime('%Y-%m-%d %H:%M UTC')
-    except:
-        time_str = data.get('timestamp', 'N/A')
+    time_str = format_timestamp(data.get('timestamp', 'N/A'))
+
+    # Format coordinates
+    lat = float(data.get('lat', 0))
+    lon = float(data.get('lon', 0))
+    lat_str, lon_str = format_coordinates(lat, lon)
 
     # Format and draw ship data
     y_pos = 80
     info_lines = [
         f"MMSI: {Config.MMSI}",
-        "Status: Vessel Docked",
+        f"Position: {lat_str}, {lon_str}",
         f"Speed: {data.get('speed', 'N/A')} knots",
         f"Course: {data.get('course', 'N/A')}°",
         f"Last Update: {time_str}"
@@ -41,48 +49,48 @@ def create_ship_display(data):
         draw.text((40, y_pos), line, font=font, fill=0)
         y_pos += 30
 
-    # Draw bottom info
-    draw.text((40, 400), "Note: Position data not available while vessel is docked", font=font, fill=0)
-
     # Convert to BMP
     img_byte_arr = io.BytesIO()
     img.save(img_byte_arr, format='BMP')
     return img_byte_arr.getvalue()
 
+@app.route('/')
+def home():
+    """Root route that explains the API"""
+    return jsonify({
+        "name": "TRMNL Ship Tracker",
+        "description": "API for tracking ship positions on TRMNL e-ink display",
+        "endpoints": {
+            "/webhook": "GET - TRMNL webhook endpoint for display updates",
+        },
+        "status": "running"
+    })
+
 @app.route('/webhook', methods=['GET'])
 def trmnl_webhook():
     """TRMNL webhook endpoint"""
     try:
-        # Fetch from vessel finder endpoint
-        url = f"{Config.POSITION_API_URL}/{Config.MMSI}"
-        print(f"\nFetching data from: {url}")
-        
-        response = requests.get(url)
-        print(f"Response Status: {response.status_code}")
-        print(f"Response Content: {response.text}")
-        
-        if response.status_code != 200:
-            return jsonify({
-                "error": f"Position API returned status {response.status_code}",
-                "details": response.text
-            }), response.status_code
-
-        data = response.json()
+        # Fetch vessel position data
+        data = position_api.get_vessel_position(Config.MMSI)
         if not data or 'data' not in data:
             return jsonify({
-                "error": "Invalid data format received",
+                "error": "Invalid data format received from position API",
                 "response": data
             }), 500
 
+        # Format the data
+        formatted_data = position_api.format_position_data(data['data'])
+        
         # Create the display image
-        image_data = create_ship_display(data['data'])
+        image_data = create_ship_display(formatted_data)
         
         # Return bitmap with TRMNL headers
         return Response(
             image_data,
             mimetype='image/bmp',
             headers={
-                'X-TRMNL-Refresh': str(Config.REFRESH_INTERVAL)
+                'X-TRMNL-Refresh': str(Config.REFRESH_INTERVAL),
+                'X-TRMNL-API-Key': Config.TRMNL_API_KEY
             }
         )
 
