@@ -18,6 +18,7 @@ class Config:
     # API Keys
     TRMNL_API_KEY = os.getenv('TRMNL_API_KEY')
     AIS_API_KEY = os.getenv('AIS_API_KEY')
+    TRMNL_PLUGIN_UUID = os.getenv('TRMNL_PLUGIN_UUID')
     
     # Display Configuration
     DISPLAY_WIDTH = 800

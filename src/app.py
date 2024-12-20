@@ -1,4 +1,4 @@
-from flask import Flask, Response, jsonify
+from flask import Flask, Response, jsonify, request
 import asyncio
 import threading
 from .config import Config
@@ -21,21 +21,14 @@ tracking_thread = threading.Thread(target=start_position_tracking)
 tracking_thread.daemon = True
 tracking_thread.start()
 
-@app.route('/')
-def home():
-    """Root route that explains the API"""
-    return jsonify({
-        "name": "TRMNL Ship Tracker",
-        "description": "API for tracking ship positions on TRMNL e-ink display",
-        "endpoints": {
-            "/webhook": "GET - TRMNL webhook endpoint for display updates",
-        },
-        "status": "running"
-    })
-
 @app.route('/webhook', methods=['GET'])
 def trmnl_webhook():
     """TRMNL webhook endpoint"""
+    # Verify TRMNL Plugin UUID
+    plugin_uuid = request.headers.get('X-TRMNL-Plugin-UUID')
+    if plugin_uuid != Config.TRMNL_PLUGIN_UUID:
+        return jsonify({"error": "Invalid Plugin UUID"}), 401
+
     try:
         # Get the latest ship data
         ship_data = position_api.get_latest_data()
@@ -49,7 +42,7 @@ def trmnl_webhook():
             mimetype='image/bmp',
             headers={
                 'X-TRMNL-Refresh': str(Config.REFRESH_INTERVAL),
-                'X-TRMNL-API-Key': Config.TRMNL_API_KEY
+                'X-TRMNL-Plugin-UUID': Config.TRMNL_PLUGIN_UUID
             }
         )
 
@@ -61,6 +54,7 @@ def trmnl_webhook():
 
 if __name__ == "__main__":
     print(f"\nStarting TRMNL Ship Tracker")
+    print(f"Plugin UUID: {Config.TRMNL_PLUGIN_UUID}")
     print(f"Position API URL: {Config.POSITION_API_URL}")
     print(f"Target MMSI: {Config.MMSI}")
     print(f"Refresh Interval: {Config.REFRESH_INTERVAL} seconds")
