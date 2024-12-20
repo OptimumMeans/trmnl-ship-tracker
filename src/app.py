@@ -16,38 +16,36 @@ display_generator = DisplayGenerator(Config.DISPLAY_WIDTH, Config.DISPLAY_HEIGHT
 position_api = PositionAPI(Config.POSITION_API_URL)
 
 def create_ship_display(data):
-    """Create a 1-bit bitmap display for TRMNL's e-ink screen"""
+    """Create a 1-bit bitmap display for TRMNL's e-ink screen with test pattern"""
     # Create white background (1-bit color)
     img = Image.new('1', (Config.DISPLAY_WIDTH, Config.DISPLAY_HEIGHT), 1)
     draw = ImageDraw.Draw(img)
     
-    # Use default font
+    # Draw a test pattern - black rectangle border
+    draw.rectangle([10, 10, Config.DISPLAY_WIDTH-10, Config.DISPLAY_HEIGHT-10], outline=0, width=2)
+    
+    # Draw some test text
     font = ImageFont.load_default()
+    draw.text((40, 40), "TRMNL Display Test", font=font, fill=0)
+    draw.text((40, 80), "If you can see this, display is working", font=font, fill=0)
     
-    # Draw header
-    draw.text((40, 40), "Ship Tracker - Position Status", font=font, fill=0)
-    
-    # Format timestamp
-    time_str = format_timestamp(data.get('timestamp', 'N/A'))
-
-    # Format coordinates
-    lat = float(data.get('lat', 0))
-    lon = float(data.get('lon', 0))
-    lat_str, lon_str = format_coordinates(lat, lon)
-
-    # Format and draw ship data
-    y_pos = 80
-    info_lines = [
-        f"MMSI: {Config.MMSI}",
-        f"Position: {lat_str}, {lon_str}",
-        f"Speed: {data.get('speed', 'N/A')} knots",
-        f"Course: {data.get('course', 'N/A')}°",
-        f"Last Update: {time_str}"
-    ]
-
-    for line in info_lines:
-        draw.text((40, y_pos), line, font=font, fill=0)
-        y_pos += 30
+    # Draw position data if available
+    y_pos = 120
+    try:
+        info_lines = [
+            f"MMSI: {Config.MMSI}",
+            f"Position: {data.get('lat', 'N/A')}, {data.get('lon', 'N/A')}",
+            f"Speed: {data.get('speed', 'N/A')} knots",
+            f"Course: {data.get('course', 'N/A')}°",
+            f"Last Update: {data.get('timestamp', 'N/A')}"
+        ]
+        
+        for line in info_lines:
+            draw.text((40, y_pos), line, font=font, fill=0)
+            y_pos += 30
+            
+    except Exception as e:
+        draw.text((40, y_pos), f"Error: {str(e)}", font=font, fill=0)
 
     # Convert to BMP
     img_byte_arr = io.BytesIO()
