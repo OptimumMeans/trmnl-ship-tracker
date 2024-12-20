@@ -13,10 +13,11 @@ class Config:
     # Ship Tracking Configuration
     MMSI = os.getenv('MMSI', '235103357')
     POSITION_API_URL = os.getenv('POSITION_API_URL')
-    REFRESH_INTERVAL = int(os.getenv('REFRESH_INTERVAL', '900'))  # 15 minutes
+    REFRESH_INTERVAL = int(os.getenv('REFRESH_INTERVAL', '900'))
     
-    # TRMNL Configuration
+    # API Keys
     TRMNL_API_KEY = os.getenv('TRMNL_API_KEY')
+    AIS_API_KEY = os.getenv('AIS_API_KEY')
     
     # Display Configuration
     DISPLAY_WIDTH = 800

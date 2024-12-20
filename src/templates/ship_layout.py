@@ -1,50 +1,31 @@
-def get_html_template():
-    """
-    Returns HTML template following TRMNL design system
-    """
-    return '''
-    <div class="view view--full">
-        <div class="layout layout--col gap--large">
-            <!-- Ship Info -->
-            <div class="item">
-                <div class="meta">
-                    <span class="index">1</span>
-                </div>
-                <div class="content">
-                    <span class="title">{{ship_name}}</span>
-                    <span class="description">MMSI: {{mmsi}}</span>
-                </div>
-            </div>
+from PIL import ImageFont
+import os
 
-            <!-- Position Data -->
-            <div class="item bg-white">
-                <div class="content">
-                    <span class="value value--large value--tnums">{{lat}}, {{lon}}</span>
-                    <span class="label">Position</span>
-                </div>
-            </div>
-
-            <!-- Speed and Course -->
-            <div class="layout layout--row gap">
-                <div class="item bg-white">
-                    <div class="content">
-                        <span class="value value--large value--tnums">{{speed}}</span>
-                        <span class="label">Speed (knots)</span>
-                    </div>
-                </div>
-                <div class="item bg-white">
-                    <div class="content">
-                        <span class="value value--large value--tnums">{{course}}°</span>
-                        <span class="label">Course</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="title_bar">
-            <img class="image" src="ship_icon.png" />
-            <span class="title">Ship Tracker</span>
-            <span class="instance">Last Update: {{timestamp}}</span>
-        </div>
-    </div>
-    '''
+class ShipLayout:
+    def __init__(self):
+        self.font = ImageFont.load_default()
+        
+    def draw(self, draw, data):
+        if not data:
+            self._draw_no_data(draw)
+            return
+            
+        # Draw ship info
+        draw.text((40, 40), f"Vessel: {data['ship_name']}", font=self.font, fill=0)
+        draw.text((40, 70), f"MMSI: {data['mmsi']}", font=self.font, fill=0)
+        
+        # Draw position
+        draw.text((40, 110), "Position:", font=self.font, fill=0)
+        draw.text((40, 130), f"Lat: {data['lat']}°", font=self.font, fill=0)
+        draw.text((40, 150), f"Lon: {data['lon']}°", font=self.font, fill=0)
+        
+        # Draw speed and course
+        draw.text((40, 190), f"Speed: {data['speed']} knots", font=self.font, fill=0)
+        draw.text((40, 210), f"Course: {data['course']}°", font=self.font, fill=0)
+        
+        # Draw timestamp
+        draw.text((40, 250), f"Last Update: {data['timestamp']}", font=self.font, fill=0)
+        
+    def _draw_no_data(self, draw):
+        draw.text((40, 40), "No vessel data available", font=self.font, fill=0)
+        draw.text((40, 70), "Waiting for updates...", font=self.font, fill=0)

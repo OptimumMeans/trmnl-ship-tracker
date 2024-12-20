@@ -1,66 +1,50 @@
-import requests
-from typing import Dict, Optional
+import websockets
+import json
+import asyncio
+from datetime import datetime
 
 class PositionAPI:
-    def __init__(self, base_url: str):
-        self.base_url = base_url.rstrip('/')  # Remove trailing slash if present
-
-    def get_vessel_position(self, mmsi: str) -> Optional[Dict]:
-        """
-        Fetch vessel position data from position-api
-        """
-        try:
-            # First try with MMSI as path parameter
-            url = f"{self.base_url}/{mmsi}"
-            print(f"Attempting to fetch position from: {url}")  # Debug print
-            
-            response = requests.get(url)
-            print(f"API Response Status: {response.status_code}")  # Debug print
-            print(f"API Response Content: {response.text}")  # Debug print
-            
-            response.raise_for_status()
-            return response.json()
-            
-        except requests.RequestException as e:
-            print(f"Error fetching position: {str(e)}")
-            
-            # Try alternative endpoint format if first attempt fails
-            try:
-                url = f"{self.base_url}?mmsi={mmsi}"
-                print(f"Retrying with query parameter: {url}")  # Debug print
-                
-                response = requests.get(url)
-                print(f"Second attempt Status: {response.status_code}")  # Debug print
-                print(f"Second attempt Content: {response.text}")  # Debug print
-                
-                response.raise_for_status()
-                return response.json()
-                
-            except requests.RequestException as e:
-                print(f"Error on second attempt: {str(e)}")
-                return None
-
-    def format_position_data(self, data: Dict) -> Dict:
-        """
-        Format raw position data for display
-        """
-        if not data:
-            return {
-                'ship_name': 'Unknown',
-                'mmsi': 'N/A',
-                'lat': 'N/A',
-                'lon': 'N/A',
-                'speed': 'N/A',
-                'course': 'N/A',
-                'timestamp': 'N/A'
+    def __init__(self, url, api_key):
+        self.url = url
+        self.api_key = api_key
+        self.latest_data = None
+    
+    async def connect_and_listen(self, mmsi):
+        async with websockets.connect(self.url) as websocket:
+            # Send subscription message
+            subscribe_message = {
+                "APIKey": self.api_key,
+                "BoundingBoxes": [[[-90, -180], [90, 180]]],
+                "FiltersShipMMSI": [str(mmsi)],
+                "FilterMessageTypes": ["PositionReport"]
             }
+            
+            await websocket.send(json.dumps(subscribe_message))
+            
+            async for message in websocket:
+                try:
+                    data = json.loads(message)
+                    if data['MessageType'] == 'PositionReport':
+                        self.latest_data = self.format_position_data(data)
+                except Exception as e:
+                    print(f"Error processing message: {e}")
 
+    def format_position_data(self, data):
+        if not data:
+            return None
+            
+        message = data['Message']['PositionReport']
+        metadata = data['MetaData']
+        
         return {
-            'ship_name': data.get('name', 'Unknown'),
-            'mmsi': data.get('mmsi', 'N/A'),
-            'lat': f"{data.get('lat', 0):.4f}",
-            'lon': f"{data.get('lon', 0):.4f}",
-            'speed': data.get('speed', 'N/A'),
-            'course': data.get('course', 'N/A'),
-            'timestamp': data.get('timestamp', 'N/A')
+            'ship_name': metadata.get('ShipName', 'Unknown'),
+            'mmsi': metadata.get('MMSI', 'N/A'),
+            'lat': f"{message.get('Latitude', 0):.4f}",
+            'lon': f"{message.get('Longitude', 0):.4f}",
+            'speed': message.get('Sog', 'N/A'),
+            'course': message.get('Cog', 'N/A'),
+            'timestamp': metadata.get('time_utc', 'N/A')
         }
+
+    def get_latest_data(self):
+        return self.latest_data
